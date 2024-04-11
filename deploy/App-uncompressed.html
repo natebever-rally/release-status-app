@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>ReleaseSummary</title>
 
@@ -7,279 +8,280 @@
 
     <script type="text/javascript">
         Rally.onReady(function () {
-                Ext.define('CustomApp', {
-    extend: 'Rally.app.App',
-    componentCls: 'app',
+            Ext.define('CustomApp', {
+                extend: 'Rally.app.App',
+                componentCls: 'app',
 
-    drawStatusBox: function(label, part, total) {
-        const SIZE = 80;
-        const OFFSET = 10;
+                launch: function () {
 
-        const mainBox = Ext.get('main-box');
-        const div = mainBox.createChild({tag: 'div', id: 'stat-box', class: 'center'});
-        
-        div.createChild({tag: 'div', html: label, class: 'center label'});
+                    const timeScope = this.getContext().getTimeboxScope();
 
-        const chartDiv = this.createProgressMeter(SIZE, OFFSET, part, total);
-        const circleDiv = this.createCircleDiv(SIZE, OFFSET);
-        const svgDiv = div.createChild({tag: 'div', class: 'center', id: 'svg-div'});
+                    if (!timeScope) {
+                        this.releasecombo = this.add({
+                            xtype: 'rallyreleasecombobox',
+                            listeners: {
+                                scope: this,
+                                select: this._onReleaseChange,
+                                ready: this._onReleaseChange
+                            }
+                        });
+                    }
+                    else {
+                        this.onTimeboxScopeChange();
+                    }
+                },
 
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('width', SIZE);
-        svg.setAttribute('height', SIZE);
+                onTimeboxScopeChange: function (newScope) {
+                    const timeScope = (!newScope) ? this.getContext().getTimeboxScope() : newScope;
+                    this.timeboxFilters = timeScope.getQueryFilter();
+                    this.cleanHtml();
+                    this.loadAllData();
+                },
 
-        svg.appendChild(circleDiv);
-        svg.appendChild(chartDiv);
-        svgDiv.appendChild(svg);
+                _onReleaseChange: function () {
 
-        div.createChild({tag: 'div', html: `${part}/${total} Finished`, class: 'center summary'});
-        div.createChild({tag: 'div', html: `${Math.floor((part/total) * 100)}%`, class: 'percent'});
-    },
+                    this.timeboxFilters = this.releasecombo.getQueryFromSelected();
+                    debugger;
+                    this.cleanHtml();
 
-    calculateUnrefiendValues: function(RADIUS, percent) {
-        
-        const theta = percent * (2*Math.PI);
+                    this.loadAllData();
+                },
 
-        return {
-            theta, 
-            x: RADIUS * Math.cos(theta),
-            y: RADIUS * Math.sin(theta)
-        };
-    },
+                loadData: async function (model, stateField, fetchFields, doneStates) {
 
-    createCircleDiv: function(SIZE, OFFSET) {
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('r', (SIZE / 2));
-        circle.setAttribute('cx', (SIZE/2) + OFFSET);
-        circle.setAttribute('cy', (SIZE/2) + OFFSET);
-        circle.setAttribute('stroke', 'lightgray');
-        circle.setAttribute('fill', 'none');
-        circle.setAttribute('stroke-width', 3);
-        return circle;
-    },
+                    Ext.getBody().mask('Loading...');
 
-    createProgressMeter: function(SIZE, OFFSET, part, total) {
+                    const store = Ext.create('Rally.data.wsapi.Store', {
+                        model: model,
+                        fetch: fetchFields,
+                        limit: Infinity,
+                        filters: [
+                            this.timeboxFilters
+                        ]
+                    });
 
-        if (part === total) {
-            return this.createDoneCircle(SIZE, OFFSET);
-        }
+                    const items = await store.load();
 
-        return this.createPartialDoneCircle(SIZE, OFFSET, part, total);
-    },
+                    Ext.getBody().unmask();
+                    return this.reduceToFinishedItems(items, stateField, doneStates);
+                },
 
-    createDoneCircle: function(SIZE, OFFSET) {
-        
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('r', (SIZE / 2));
-        circle.setAttribute('cx', (SIZE/2) + OFFSET);
-        circle.setAttribute('cy', (SIZE/2) + OFFSET);
-        circle.setAttribute('stroke', '#57c282');
-        circle.setAttribute('fill', 'none');
-        circle.setAttribute('stroke-width', 8);
-        return circle;
-    },
+                loadAllData: async function () {
 
-    createPartialDoneCircle: function(SIZE, OFFSET, part, total) {
-        const RADIUS = SIZE / 2;
-        const ratio = (part / total);
-        const {theta, x, y} = this.calculateUnrefiendValues(RADIUS, ratio);
+                    const defectSummary = await this.loadData('Defect', 'State', ['PlanEstimate', 'State'], ['Closed']);
+                    const storySummary = await this.loadData('HierarchicalRequirement', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
+                    const testSetSummary = await this.loadData('TestSet', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
 
-        const {mX, mY, longSweep} = this.modifyArcCoordinates(RADIUS, OFFSET, theta, x, y);
+                    const stats = {
+                        defects: defectSummary,
+                        stories: storySummary,
+                        testSets: testSetSummary
+                    };
 
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', `M ${OFFSET} ${OFFSET + RADIUS} A ${RADIUS} ${RADIUS} 0 ${longSweep} 1 ${mX} ${mY}`);
-        path.setAttribute('stroke', '#5691f0');
-        path.setAttribute('stroke-width', 8);
-        path.setAttribute('stroke-linecap', 'round');
-        path.setAttribute('fill', 'none');
+                    console.log(stats);
 
-        return path;
-    },
+                    this.drawScreen(stats);
+                },
 
-    drawScreen: function(stats) {
+                reduceToFinishedItems: function (items, stateField, doneStates) {
 
-        const body = Ext.getBody();
-        const mainDiv = body.query('div span div')[0];
-        
-        const contentDiv = document.createElement('div');
-        contentDiv.setAttribute('id', 'main-box');
-        mainDiv.appendChild(contentDiv);
+                    const finishedItems = items.reduce((currentCount, item) => {
+                        const data = item.data;
 
-        const { defects, testSets, stories } = stats;
+                        const pointValue = parseFloat(data.PlanEstimate);
+                        const points = isNaN(pointValue) ? 0 : pointValue;
 
-        const points = defects.points + testSets.points + stories.points;
-        const totalPoints = defects.totalPoints + testSets.totalPoints + stories.totalPoints;
-        const count = defects.count + testSets.count + stories.count;
-        const totalCount = defects.totalCount + testSets.totalCount + stories.totalCount;
+                        const newState = { ...currentCount, totalPoints: currentCount.totalPoints + points, totalCount: currentCount.totalCount + 1 };
 
-        const releaseTitleDiv = document.createElement('div');
-        releaseTitleDiv.textContent = 'Release';
-        contentDiv.append(releaseTitleDiv);
+                        if (doneStates.includes(data[stateField])) {
+                            newState.points = currentCount.points + points;
+                            newState.count = currentCount.count + 1;
+                        }
+                        return newState;
+                    }, { points: 0, count: 0, totalPoints: 0, totalCount: 0 });
 
-        this.drawStatusBox('Points', points, totalPoints);
-        this.drawStatusBox('Count', count, totalCount);
-    },
+                    return finishedItems;
+                },
 
-    isQuadrant: function(theta, quad /*1-4*/) {
+                cleanHtml: function () {
+                    const mainDiv = Ext.get('main-box');
 
-        const HALF_PI = Math.PI / 2;
-        return (theta >= (quad - 1) * HALF_PI && theta < (quad * HALF_PI));
-    },
+                    if (mainDiv) {
+                        const parent = mainDiv.dom.parentNode;
+                        parent.removeChild(mainDiv.dom);
+                    }
+                },
 
-    launch: function() {
+                drawScreen: function (stats) {
 
-        const timeScope = this.getContext().getTimeboxScope();
+                    const body = Ext.getBody();
+                    const mainDiv = body.query('div span div')[0];
 
-        if (!timeScope) {
-            this.releasecombo = this.add({
-                xtype: 'rallyreleasecombobox', 
-                listeners: {
-                    scope: this,
-                    select: this._onReleaseChange,
-                    ready: this._onReleaseChange
-                }
+                    const contentDiv = document.createElement('div');
+                    contentDiv.setAttribute('id', 'main-box');
+                    mainDiv.appendChild(contentDiv);
+
+                    const { defects, testSets, stories } = stats;
+
+                    const points = defects.points + testSets.points + stories.points;
+                    const totalPoints = defects.totalPoints + testSets.totalPoints + stories.totalPoints;
+                    const count = defects.count + testSets.count + stories.count;
+                    const totalCount = defects.totalCount + testSets.totalCount + stories.totalCount;
+
+                    const releaseTitleDiv = document.createElement('div');
+                    releaseTitleDiv.textContent = 'Release';
+                    contentDiv.append(releaseTitleDiv);
+
+                    this.drawStatusBox('Points', points, totalPoints);
+                    this.drawStatusBox('Count', count, totalCount);
+                },
+
+
+                drawStatusBox: function (label, part, total) {
+                    const SIZE = 80;
+                    const OFFSET = 10;
+
+                    const mainBox = Ext.get('main-box');
+                    const div = mainBox.createChild({ tag: 'div', id: 'stat-box', class: 'center' });
+
+                    div.createChild({ tag: 'div', html: label, class: 'center label' });
+
+                    const chartDiv = this.createProgressMeter(SIZE, OFFSET, part, total);
+                    const circleDiv = this.createCircleDiv(SIZE, OFFSET);
+                    const svgDiv = div.createChild({ tag: 'div', class: 'center', id: 'svg-div' });
+
+                    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('width', SIZE);
+                    svg.setAttribute('height', SIZE);
+
+                    svg.appendChild(circleDiv);
+                    svg.appendChild(chartDiv);
+                    svgDiv.appendChild(svg);
+
+                    div.createChild({ tag: 'div', html: `${part}/${total} Finished`, class: 'center summary' });
+                    div.createChild({ tag: 'div', html: `${Math.floor((part / total) * 100)}%`, class: 'percent' });
+                },
+
+                createCircleDiv: function (SIZE, OFFSET) {
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('r', (SIZE / 2));
+                    circle.setAttribute('cx', (SIZE / 2) + OFFSET);
+                    circle.setAttribute('cy', (SIZE / 2) + OFFSET);
+                    circle.setAttribute('stroke', 'lightgray');
+                    circle.setAttribute('fill', 'none');
+                    circle.setAttribute('stroke-width', 3);
+                    return circle;
+                },
+
+                createProgressMeter: function (SIZE, OFFSET, part, total) {
+
+                    if (part === total) {
+                        return this.createDoneCircle(SIZE, OFFSET);
+                    }
+
+                    return this.createPartialDoneCircle(SIZE, OFFSET, part, total);
+                },
+
+                createDoneCircle: function (SIZE, OFFSET) {
+
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('r', (SIZE / 2));
+                    circle.setAttribute('cx', (SIZE / 2) + OFFSET);
+                    circle.setAttribute('cy', (SIZE / 2) + OFFSET);
+                    circle.setAttribute('stroke', '#57c282');
+                    circle.setAttribute('fill', 'none');
+                    circle.setAttribute('stroke-width', 8);
+                    return circle;
+                },
+
+                createPartialDoneCircle: function (SIZE, OFFSET, part, total) {
+                    const RADIUS = SIZE / 2;
+                    const ratio = (part / total);
+                    const { theta, x, y } = this.calculateUnrefiendValues(RADIUS, ratio);
+
+                    const { mX, mY, longSweep } = this.modifyArcCoordinates(RADIUS, OFFSET, theta, x, y);
+
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', `M ${OFFSET} ${OFFSET + RADIUS} A ${RADIUS} ${RADIUS} 0 ${longSweep} 1 ${mX} ${mY}`);
+                    path.setAttribute('stroke', '#5691f0');
+                    path.setAttribute('stroke-width', 8);
+                    path.setAttribute('stroke-linecap', 'round');
+                    path.setAttribute('fill', 'none');
+
+                    return path;
+                },
+
+                calculateUnrefiendValues: function (RADIUS, percent) {
+
+                    const theta = percent * (2 * Math.PI);
+
+                    return {
+                        theta,
+                        x: RADIUS * Math.cos(theta),
+                        y: RADIUS * Math.sin(theta)
+                    };
+                },
+
+                isQuadrant: function (theta, quad /*1-4*/) {
+
+                    const HALF_PI = Math.PI / 2;
+                    return (theta >= (quad - 1) * HALF_PI && theta < (quad * HALF_PI));
+                },
+
+                modifyArcCoordinates: function (RADIUS, OFFSET, theta, x, y) {
+
+                    if (this.isQuadrant(theta, 1)) {
+                        return this.modifyQ1(RADIUS, OFFSET, x, y);
+                    }
+                    else if (this.isQuadrant(theta, 2)) {
+                        return this.modifyQ2(RADIUS, OFFSET, x, y);
+                    }
+                    else if (this.isQuadrant(theta, 3)) {
+                        return this.modifyQ3(RADIUS, OFFSET, x, y);
+                    }
+                    else {
+                        return this.modifyQ4(RADIUS, OFFSET, x, y);
+                    }
+                },
+
+                modifyQ1: function (RADIUS, OFFSET, x, y) {
+                    return {
+                        mX: RADIUS - x + OFFSET,
+                        mY: RADIUS - y + OFFSET,
+                        longSweep: 0
+                    };
+                },
+
+                modifyQ2: function (RADIUS, OFFSET, x, y) {
+                    return {
+                        mX: ((x - RADIUS) * -1) + OFFSET,
+                        mY: RADIUS - y + OFFSET,
+                        longSweep: 0
+                    };
+                },
+
+                modifyQ3: function (RADIUS, OFFSET, x, y) {
+                    return {
+                        mX: ((x - RADIUS) * -1) + OFFSET,
+                        mY: ((y - RADIUS) * -1) + OFFSET,
+                        longSweep: 1
+                    };
+                },
+
+                modifyQ4: function (RADIUS, OFFSET, x, y) {
+                    return {
+                        mX: RADIUS - x + OFFSET,
+                        mY: ((y - RADIUS) * -1) + OFFSET,
+                        longSweep: 1
+                    };
+                },
             });
-        }
-        else {
-            this.onTimeboxScopeChange();
-        }
-    },
-
-    onTimeboxScopeChange: function(newScope) {
-        const timeScope = (!newScope) ? this.getContext().getTimeboxScope() : newScope;
-        this.timeboxFilters = timeScope.getQueryFilter();
-        this.cleanHtml();
-        this.loadAllData();
-    },
-
-    _onReleaseChange: function() {
-
-        this.timeboxFilters = this.releasecombo.getQueryFromSelected();
-        debugger;
-        this.cleanHtml();
-
-        this.loadAllData();
-    },
-
-    cleanHtml: function() {
-        const mainDiv = Ext.get('main-box');
-
-        if (mainDiv) {
-            const parent = mainDiv.dom.parentNode;
-            parent.removeChild(mainDiv.dom);
-        }
-    },
-
-    modifyArcCoordinates: function(RADIUS, OFFSET, theta, x, y) {
-
-        if (this.isQuadrant(theta, 1)) {
-            return this.modifyQ1(RADIUS, OFFSET, x, y);
-        }
-        else if (this.isQuadrant(theta, 2)) {
-            return this.modifyQ2(RADIUS, OFFSET, x, y);
-        }
-        else if (this.isQuadrant(theta, 3)) {
-            return this.modifyQ3(RADIUS, OFFSET, x, y);
-        }
-        else {
-            return this.modifyQ4(RADIUS, OFFSET, x, y);
-        }
-    },
-
-    modifyQ1: function(RADIUS, OFFSET, x, y) {
-        return {
-            mX: RADIUS - x + OFFSET,
-            mY: RADIUS - y + OFFSET,
-            longSweep: 0
-        };
-    },
-
-    modifyQ2: function(RADIUS, OFFSET, x, y) {
-        return {
-            mX: ((x - RADIUS) * -1) + OFFSET,
-            mY: RADIUS - y + OFFSET,
-            longSweep: 0
-        };
-    },
-
-    modifyQ3: function(RADIUS, OFFSET, x, y) {
-        return {
-            mX: ((x - RADIUS) * -1) + OFFSET,
-            mY: ((y - RADIUS) * -1) + OFFSET,
-            longSweep: 1
-        };
-    },
-
-    modifyQ4: function(RADIUS, OFFSET, x, y) {
-        return {
-            mX: RADIUS - x + OFFSET,
-            mY: ((y - RADIUS) * -1) + OFFSET,
-            longSweep: 1
-        };
-    },
-
-    reduceToFinishedItems: function(items, stateField, doneStates) {
-
-        const finishedItems =  items.reduce((currentCount, item) => {
-            const data = item.data;
-            
-            const pointValue = parseFloat(data.PlanEstimate);
-            const points = isNaN(pointValue) ? 0 : pointValue;
-
-            const newState = {...currentCount, totalPoints: currentCount.totalPoints + points, totalCount: currentCount.totalCount + 1 };
-
-            if (doneStates.includes(data[stateField])) {
-                newState.points = currentCount.points + points;
-                newState.count = currentCount.count + 1;
-            }
-            return newState;
-        }, {points: 0, count: 0, totalPoints: 0, totalCount: 0});
-
-        return finishedItems;
-    },
-
-    loadData: async function(model, stateField, fetchFields, doneStates) {
-
-        Ext.getBody().mask('Loading...');
-
-        const store = Ext.create('Rally.data.wsapi.Store', {
-            model: model,
-            fetch: fetchFields,
-            limit: Infinity,
-            filters: [
-                this.timeboxFilters
-            ]
-        });
-
-        const items = await store.load();
-
-        Ext.getBody().unmask();
-        return this.reduceToFinishedItems(items, stateField, doneStates);
-    },
-
-    loadAllData: async function() {
-
-        const defectSummary = await this.loadData('Defect', 'State', ['PlanEstimate', 'State'], ['Closed']);
-        const storySummary = await this.loadData('HierarchicalRequirement', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
-        const testSetSummary = await this.loadData('TestSet', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
-
-        const stats = {
-            defects: defectSummary,
-            stories: storySummary,
-            testSets: testSetSummary
-        };
-
-        console.log(stats);
-
-        this.drawScreen(stats);
-    }
-});
 
 
             Rally.launchApp('CustomApp', {
-                name:"ReleaseSummary",
-                parentRepos:"",
-                version:"0.1.1"
+                name: "ReleaseSummary",
+                parentRepos: "",
+                version: "0.1.1"
             });
 
         });
@@ -289,46 +291,54 @@
 
     <style type="text/css">
         .app #main-box {
-  display: flex;
-  flex-direction: row;
-  position: relative;
-}
-.app #svg-div {
-  height: 100px;
-  width: 100px;
-  margin: auto;
-}
-.app svg {
-  height: 100%;
-  width: 100%;
-  display: block;
-}
-.app #stat-box {
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-.app .label {
-  font-weight: bold;
-  font-size: large;
-}
-.app .center {
-  text-align: center;
-}
-.app .summary {
-  font-size: 16px;
-}
-.app .percent {
-  font-size: 24px;
-  position: absolute;
-  text-align: center;
-  padding-top: 58px;
-  width: 100%;
-}
+            display: flex;
+            flex-direction: row;
+            position: relative;
+        }
 
+        .app #svg-div {
+            height: 100px;
+            width: 100px;
+            margin: auto;
+        }
+
+        .app svg {
+            height: 100%;
+            width: 100%;
+            display: block;
+        }
+
+        .app #stat-box {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .app .label {
+            font-weight: bold;
+            font-size: large;
+        }
+
+        .app .center {
+            text-align: center;
+        }
+
+        .app .summary {
+            font-size: 16px;
+        }
+
+        .app .percent {
+            font-size: 24px;
+            position: absolute;
+            text-align: center;
+            padding-top: 58px;
+            width: 100%;
+        }
     </style>
 </head>
+
 <body>
 </body>
+
 </html>

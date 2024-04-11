@@ -2,6 +2,113 @@ Ext.define('CustomApp', {
     extend: 'Rally.app.App',
     componentCls: 'app',
 
+    launch: function() {
+
+        const timeScope = this.getContext().getTimeboxScope();
+
+        if (!timeScope) {
+            this.releasecombo = this.add({
+                xtype: 'rallyreleasecombobox', 
+                listeners: {
+                    scope: this,
+                    select: this._onReleaseChange,
+                    ready: this._onReleaseChange
+                }
+            });
+        }
+        else {
+            this.onTimeboxScopeChange();
+        }
+    },
+
+    loadData: async function(model, stateField, fetchFields, doneStates) {
+
+        Ext.getBody().mask('Loading...');
+
+        const store = Ext.create('Rally.data.wsapi.Store', {
+            model: model,
+            fetch: fetchFields,
+            limit: Infinity,
+            filters: [
+                this.timeboxFilters
+            ]
+        });
+
+        const items = await store.load();
+
+        Ext.getBody().unmask();
+        return this.reduceToFinishedItems(items, stateField, doneStates);
+    },
+
+    loadAllData: async function() {
+
+        const defectSummary = await this.loadData('Defect', 'State', ['PlanEstimate', 'State'], ['Closed']);
+        const storySummary = await this.loadData('HierarchicalRequirement', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
+        const testSetSummary = await this.loadData('TestSet', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
+
+        const stats = {
+            defects: defectSummary,
+            stories: storySummary,
+            testSets: testSetSummary
+        };
+
+        console.log(stats);
+
+        this.drawScreen(stats);
+    },
+
+    reduceToFinishedItems: function(items, stateField, doneStates) {
+
+        const finishedItems =  items.reduce((currentCount, item) => {
+            const data = item.data;
+            
+            const getNumericalValue = (value) => {
+                return isNaN(value) || value.length === 0 ? 0 : value;
+            };
+
+            const pointValue = parseFloat(data.PlanEstimate);
+            const points = isNaN(pointValue) ? 0 : pointValue;
+
+            const taskActuals = getNumericalValue(data.TaskActualTotal);
+            const taskEstimates = getNumericalValue(data.TaskEstimateTotal);
+            const taskTodos = getNumericalValue(data.TaskRemainingTotal);
+
+            const newState = {
+                ...currentCount, 
+                totalPoints: currentCount.totalPoints + points, 
+                totalCount: currentCount.totalCount + 1,
+                taskActuals: currentCount.taskActuals + taskActuals,
+                taskEstimates: currentCount.taskEstimates + taskEstimates,
+                taskTodo: currentCount.taskTodo + taskTodos
+            };
+
+            if (doneStates.includes(data[stateField])) {
+                newState.points = currentCount.points + points;
+                newState.count = currentCount.count + 1;
+            }
+            return newState;
+        }, {points: 0, count: 0, totalPoints: 0, totalCount: 0, taskActuals: 0, taskEstimates: 0, taskTodo: 0});
+
+        return finishedItems;
+    },
+
+    onTimeboxScopeChange: function(newScope) {
+        const timeScope = (!newScope) ? this.getContext().getTimeboxScope() : newScope;
+        this.timeboxFilters = timeScope.getQueryFilter();
+        this.release = timeScope.getRecord();
+        this.cleanHtml();
+        this.loadAllData();
+    },
+
+    _onReleaseChange: function() {
+
+        this.timeboxFilters = this.releasecombo.getQueryFromSelected();
+        this.release = this.releasecombo.getRecord();
+        this.cleanHtml();
+
+        this.loadAllData();
+    },
+
     createElement: function(tag, text, classes, id) {
 
         const elem = document.createElement(tag);
@@ -19,6 +126,55 @@ Ext.define('CustomApp', {
         }
 
         return elem;
+    },
+
+    drawScreen: function(stats) {
+
+        const body = Ext.getBody();
+        const mainDiv = body.query('div span div')[0];
+        
+        const contentDiv = this.createElement('div', '', '', 'main-box');
+        mainDiv.appendChild(contentDiv);
+
+        const { defects, testSets, stories } = stats;
+
+        const points = defects.points + testSets.points + stories.points;
+        const totalPoints = defects.totalPoints + testSets.totalPoints + stories.totalPoints;
+        const count = defects.count + testSets.count + stories.count;
+        const totalCount = defects.totalCount + testSets.totalCount + stories.totalCount;
+
+        const releaseName = this.createElement('div', this.release.data.Name, 'label center pad');
+        contentDiv.appendChild(releaseName);
+        const dateText = `${this.release.data.formattedStartDate} - ${this.release.data.formattedEndDate}`;
+        const dateDiv = this.createElement('div', dateText, 'center');
+        contentDiv.appendChild(dateDiv);
+
+        const statusContainer = this.createElement('div', '', 'row space');
+        contentDiv.appendChild(statusContainer);
+
+        this.drawStatusBox(statusContainer, 'Points', points, totalPoints);
+        this.drawStatusBox(statusContainer, 'Count', count, totalCount);
+
+        //task stuff
+        const fieldGenerator = (label, value) => {
+            const containerDiv = this.createElement('div', '', 'row center tasks');
+            const labelDiv = this.createElement('label', label, 'right small-label');
+            const valueDiv = this.createElement('div', value + '', 'left value');
+            containerDiv.appendChild(labelDiv);
+            containerDiv.appendChild(valueDiv);
+            return containerDiv;
+        };
+
+        const actualDiv = fieldGenerator('Task Actuals:', defects.taskActuals + testSets.taskActuals + stories.taskActuals);
+        const estimateDiv = fieldGenerator('Task Estimates:', defects.taskEstimates + testSets.taskEstimates + stories.taskEstimates);
+        const todoDiv = fieldGenerator('Task Todo:', defects.taskTodo + testSets.taskTodo + stories.taskTodo);
+
+        const taskDiv = this.createElement('div', '', 'row center-justify pad');
+        taskDiv.appendChild(actualDiv);
+        taskDiv.appendChild(estimateDiv);
+        taskDiv.appendChild(todoDiv);
+
+        contentDiv.appendChild(taskDiv);
     },
 
     drawStatusBox: function(parent, label, part, total) {
@@ -111,95 +267,11 @@ Ext.define('CustomApp', {
         return path;
     },
 
-    drawScreen: function(stats) {
-
-        const body = Ext.getBody();
-        const mainDiv = body.query('div span div')[0];
-        
-        const contentDiv = this.createElement('div', '', '', 'main-box');
-        mainDiv.appendChild(contentDiv);
-
-        const { defects, testSets, stories } = stats;
-
-        const points = defects.points + testSets.points + stories.points;
-        const totalPoints = defects.totalPoints + testSets.totalPoints + stories.totalPoints;
-        const count = defects.count + testSets.count + stories.count;
-        const totalCount = defects.totalCount + testSets.totalCount + stories.totalCount;
-
-        const releaseName = this.createElement('div', this.release.data.Name, 'label center pad');
-        contentDiv.appendChild(releaseName);
-        const dateText = `${this.release.data.formattedStartDate} - ${this.release.data.formattedEndDate}`;
-        const dateDiv = this.createElement('div', dateText, 'center');
-        contentDiv.appendChild(dateDiv);
-
-        const statusContainer = this.createElement('div', '', 'row space');
-        contentDiv.appendChild(statusContainer);
-
-        this.drawStatusBox(statusContainer, 'Points', points, totalPoints);
-        this.drawStatusBox(statusContainer, 'Count', count, totalCount);
-
-        //task stuff
-        const fieldGenerator = (label, value) => {
-            const containerDiv = this.createElement('div', '', 'row center tasks');
-            const labelDiv = this.createElement('label', label, 'right small-label');
-            const valueDiv = this.createElement('div', value + '', 'left value');
-            containerDiv.appendChild(labelDiv);
-            containerDiv.appendChild(valueDiv);
-            return containerDiv;
-        };
-
-        const actualDiv = fieldGenerator('Task Actuals:', defects.taskActuals + testSets.taskActuals + stories.taskActuals);
-        const estimateDiv = fieldGenerator('Task Estimates:', defects.taskEstimates + testSets.taskEstimates + stories.taskEstimates);
-        const todoDiv = fieldGenerator('Task Todo:', defects.taskTodo + testSets.taskTodo + stories.taskTodo);
-
-        const taskDiv = this.createElement('div', '', 'row center-justify pad');
-        taskDiv.appendChild(actualDiv);
-        taskDiv.appendChild(estimateDiv);
-        taskDiv.appendChild(todoDiv);
-
-        contentDiv.appendChild(taskDiv);
-    },
 
     isQuadrant: function(theta, quad /*1-4*/) {
 
         const HALF_PI = Math.PI / 2;
         return (theta >= (quad - 1) * HALF_PI && theta < (quad * HALF_PI));
-    },
-
-    launch: function() {
-
-        const timeScope = this.getContext().getTimeboxScope();
-
-        if (!timeScope) {
-            this.releasecombo = this.add({
-                xtype: 'rallyreleasecombobox', 
-                listeners: {
-                    scope: this,
-                    select: this._onReleaseChange,
-                    ready: this._onReleaseChange
-                }
-            });
-        }
-        else {
-            this.onTimeboxScopeChange();
-        }
-    },
-
-    onTimeboxScopeChange: function(newScope) {
-        const timeScope = (!newScope) ? this.getContext().getTimeboxScope() : newScope;
-        this.timeboxFilters = timeScope.getQueryFilter();
-        this.release = timeScope.getRecord();
-        this.cleanHtml();
-        this.loadAllData();
-    },
-
-    _onReleaseChange: function() {
-
-        this.timeboxFilters = this.releasecombo.getQueryFromSelected();
-        this.release = this.releasecombo.getRecord();
-        this.cleanHtml();
-
-        this.loadAllData();
     },
 
     cleanHtml: function() {
@@ -257,76 +329,5 @@ Ext.define('CustomApp', {
             mY: ((y - RADIUS) * -1) + OFFSET,
             longSweep: 1
         };
-    },
-
-    reduceToFinishedItems: function(items, stateField, doneStates) {
-
-        const finishedItems =  items.reduce((currentCount, item) => {
-            const data = item.data;
-            
-            const getNumericalValue = (value) => {
-                return isNaN(value) || value.length === 0 ? 0 : value;
-            };
-
-            const pointValue = parseFloat(data.PlanEstimate);
-            const points = isNaN(pointValue) ? 0 : pointValue;
-
-            const taskActuals = getNumericalValue(data.TaskActualTotal);
-            const taskEstimates = getNumericalValue(data.TaskEstimateTotal);
-            const taskTodos = getNumericalValue(data.TaskRemainingTotal);
-
-            const newState = {
-                ...currentCount, 
-                totalPoints: currentCount.totalPoints + points, 
-                totalCount: currentCount.totalCount + 1,
-                taskActuals: currentCount.taskActuals + taskActuals,
-                taskEstimates: currentCount.taskEstimates + taskEstimates,
-                taskTodo: currentCount.taskTodo + taskTodos
-            };
-
-            if (doneStates.includes(data[stateField])) {
-                newState.points = currentCount.points + points;
-                newState.count = currentCount.count + 1;
-            }
-            return newState;
-        }, {points: 0, count: 0, totalPoints: 0, totalCount: 0, taskActuals: 0, taskEstimates: 0, taskTodo: 0});
-
-        return finishedItems;
-    },
-
-    loadData: async function(model, stateField, fetchFields, doneStates) {
-
-        Ext.getBody().mask('Loading...');
-
-        const store = Ext.create('Rally.data.wsapi.Store', {
-            model: model,
-            fetch: fetchFields,
-            limit: Infinity,
-            filters: [
-                this.timeboxFilters
-            ]
-        });
-
-        const items = await store.load();
-
-        Ext.getBody().unmask();
-        return this.reduceToFinishedItems(items, stateField, doneStates);
-    },
-
-    loadAllData: async function() {
-
-        const defectSummary = await this.loadData('Defect', 'State', ['PlanEstimate', 'State'], ['Closed']);
-        const storySummary = await this.loadData('HierarchicalRequirement', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
-        const testSetSummary = await this.loadData('TestSet', 'ScheduleState', ['PlanEstimate', 'ScheduleState'], ['Accepted', 'Released']);
-
-        const stats = {
-            defects: defectSummary,
-            stories: storySummary,
-            testSets: testSetSummary
-        };
-
-        console.log(stats);
-
-        this.drawScreen(stats);
     }
 });
