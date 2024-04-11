@@ -1,0 +1,81 @@
+.app {
+     #main-box {
+          position: relative;
+     }
+
+     #svg-div {
+          height: 100px;
+          width: 100px;
+          margin: auto;
+     }
+
+     svg {
+          height: 100%;
+          width: 100%;
+          display: block;
+     }
+
+     .center {
+          text-align: center;
+          justify-content: center;
+     }
+
+     .center-justify {
+          justify-content: center;
+     }
+
+     .label {
+          font-weight: bold;
+          font-size: large;
+     }
+
+     .left {
+          padding-left: 4px;
+     }
+
+     .pad {
+          padding: 8px;
+     }
+
+     .percent {
+          font-size: 24px;
+          position: absolute;
+          text-align: center;
+          padding-top: 6px;
+          width: 100%;
+     }
+
+     .row {
+          display: flex;
+          flex-direction: row;
+     }
+
+     .small-label {
+          font-size: small;
+          align-content: center;
+     }
+
+     .space {
+          justify-content: space-around;
+     }
+
+     .stat-box {
+          flex-grow: 1;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+     }
+
+     .summary {
+          font-size: 16px;
+     }
+
+     .tasks {
+          padding: 8px;
+     }
+
+     .value {
+          font-size: medium;
+          font-weight: bold;
+     }
+}

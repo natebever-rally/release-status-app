@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ReleaseSummary</title>
+
+    <script type="text/javascript" src="https://rally1.rallydev.com/apps/2.1/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function () {
+                Ext.define("CustomApp",{extend:"Rally.app.App",componentCls:"app",drawStatusBox:function(t,e,i){const o=Ext.get("main-box").createChild({tag:"div",id:"stat-box",class:"center"});o.createChild({tag:"div",html:t,class:"center label"});const n=this.createProgressMeter(80,10,e,i),a=this.createCircleDiv(80,10),s=o.createChild({tag:"div",class:"center",id:"svg-div"}),r=document.createElementNS("http://www.w3.org/2000/svg","svg");r.setAttribute("width",80),r.setAttribute("height",80),r.appendChild(a),r.appendChild(n),s.appendChild(r),o.createChild({tag:"div",html:`${e}/${i} Finished`,class:"center summary"}),o.createChild({tag:"div",html:`${Math.floor(e/i*100)}%`,class:"percent"})},calculateUnrefiendValues:function(t,e){const i=e*(2*Math.PI);return{theta:i,x:t*Math.cos(i),y:t*Math.sin(i)}},createCircleDiv:function(t,e){const i=document.createElementNS("http://www.w3.org/2000/svg","circle");return i.setAttribute("r",t/2),i.setAttribute("cx",t/2+e),i.setAttribute("cy",t/2+e),i.setAttribute("stroke","lightgray"),i.setAttribute("fill","none"),i.setAttribute("stroke-width",3),i},createProgressMeter:function(t,e,i,o){return i===o?this.createDoneCircle(t,e):this.createPartialDoneCircle(t,e,i,o)},createDoneCircle:function(t,e){const i=document.createElementNS("http://www.w3.org/2000/svg","circle");return i.setAttribute("r",t/2),i.setAttribute("cx",t/2+e),i.setAttribute("cy",t/2+e),i.setAttribute("stroke","#57c282"),i.setAttribute("fill","none"),i.setAttribute("stroke-width",8),i},createPartialDoneCircle:function(t,e,i,o){const n=t/2,a=i/o,{theta:s,x:r,y:c}=this.calculateUnrefiendValues(n,a),{mX:l,mY:d,longSweep:u}=this.modifyArcCoordinates(n,e,s,r,c),h=document.createElementNS("http://www.w3.org/2000/svg","path");return h.setAttribute("d",`M ${e} ${e+n} A ${n} ${n} 0 ${u} 1 ${l} ${d}`),h.setAttribute("stroke","#5691f0"),h.setAttribute("stroke-width",8),h.setAttribute("stroke-linecap","round"),h.setAttribute("fill","none"),h},drawScreen:function(t){const e=Ext.getBody().query("div span div")[0],i=document.createElement("div");i.setAttribute("id","main-box"),e.appendChild(i);const{defects:o,testSets:n,stories:a}=t,s=o.points+n.points+a.points,r=o.totalPoints+n.totalPoints+a.totalPoints,c=o.count+n.count+a.count,l=o.totalCount+n.totalCount+a.totalCount;this.drawStatusBox("Points",s,r),this.drawStatusBox("Count",c,l)},isQuadrant:function(t,e){const i=Math.PI/2;return t>=(e-1)*i&&t<e*i},launch:function(){this.getContext().getTimeboxScope()?this.onTimeboxScopeChange():this.releasecombo=this.add({xtype:"rallyreleasecombobox",listeners:{scope:this,select:this._onReleaseChange,ready:this._onReleaseChange}})},onTimeboxScopeChange:function(t){const e=t||this.getContext().getTimeboxScope();this.timeboxFilters=e.getQueryFilter(),this.cleanHtml(),this.loadAllData()},_onReleaseChange:function(){this.timeboxFilters=this.releasecombo.getQueryFromSelected(),this.cleanHtml(),this.loadAllData()},cleanHtml:function(){const t=Ext.get("main-box");if(t){t.dom.parentNode.removeChild(t.dom)}},modifyArcCoordinates:function(t,e,i,o,n){return this.isQuadrant(i,1)?this.modifyQ1(t,e,o,n):this.isQuadrant(i,2)?this.modifyQ2(t,e,o,n):this.isQuadrant(i,3)?this.modifyQ3(t,e,o,n):this.modifyQ4(t,e,o,n)},modifyQ1:function(t,e,i,o){return{mX:t-i+e,mY:t-o+e,longSweep:0}},modifyQ2:function(t,e,i,o){return{mX:-1*(i-t)+e,mY:t-o+e,longSweep:0}},modifyQ3:function(t,e,i,o){return{mX:-1*(i-t)+e,mY:-1*(o-t)+e,longSweep:1}},modifyQ4:function(t,e,i,o){return{x:t-i+e,y:-1*(o-t)+e,longSweep:1}},reduceToFinishedItems:function(t,e,i){return t.reduce((t,o)=>{const n=o.data,a=parseFloat(n.PlanEstimate),s=isNaN(a)?0:a,r={...t,totalPoints:t.totalPoints+s,totalCount:t.totalCount+1};return i.includes(n[e])&&(r.points=t.points+s,r.count=t.count+1),r},{points:0,count:0,totalPoints:0,totalCount:0})},loadData:async function(t,e,i,o){Ext.getBody().mask("Loading...");const n=Ext.create("Rally.data.wsapi.Store",{model:t,fetch:i,limit:1/0,filters:[this.timeboxFilters]}),a=await n.load();return Ext.getBody().unmask(),this.reduceToFinishedItems(a,e,o)},loadAllData:async function(){const t={defects:await this.loadData("Defect","State",["PlanEstimate","State"],["Closed"]),stories:await this.loadData("HierarchicalRequirement","ScheduleState",["PlanEstimate","ScheduleState"],["Accepted","Released"]),testSets:await this.loadData("TestSet","ScheduleState",["PlanEstimate","ScheduleState"],["Accepted","Released"])};console.log(t),this.drawScreen(t)}});
+
+            Rally.launchApp('CustomApp', {
+                name:"ReleaseSummary",
+                parentRepos:"",
+                version:"0.1.1"
+            });
+
+        });
+    </script>
+
+
+    <style type="text/css">
+        .app #main-box{display:flex;flex-direction:row;position:relative}.app #svg-div{height:100px;width:100px;margin:auto}.app svg{height:100%;width:100%;display:block}.app #stat-box{flex-grow:1;display:flex;flex-direction:column;position:relative}.app .label{font-weight:bold;font-size:large}.app .center{text-align:center}.app .summary{font-size:16px}.app .percent{font-size:24px;position:absolute;text-align:center;padding-top:58px;width:100%}
+    </style>
+</head>
+<body>
+</body>
+</html>
